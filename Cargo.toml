@@ -9,3 +9,6 @@ tokio-util = { version = "0.7", features = ["codec"] }
 tokio-stream = "0.1"
 bytes = "1"
 regex = "1.12.3"
+sqlx-cli = "0.8.6"
+sqlx = { version = "0.8.6", features = ["runtime-tokio", "sqlite", "migrate"] }
+
