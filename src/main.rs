@@ -1,3 +1,5 @@
+use chrono::{DateTime, Utc};
+use sqlx::sqlite::SqlitePool;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_stream::StreamExt;
 use tokio_util::codec::{Framed, LinesCodec};
@@ -5,19 +7,22 @@ use tokio_util::codec::{Framed, LinesCodec};
 #[tokio::main]
 async fn main() {
     let listener = TcpListener::bind("127.0.0.1:1999").await.unwrap();
+    let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+    let pool = SqlitePool::connect(&database_url).await.unwrap();
 
     println!("Listening");
 
     loop {
         let (socket, _) = listener.accept().await.unwrap();
+        let pool_clone = pool.clone();
         println!("Accepted");
         tokio::spawn(async move {
-            process(socket).await;
+            process(socket, pool_clone).await;
         });
     }
 }
 
-async fn process(socket: TcpStream) {
+async fn process(socket: TcpStream, db: SqlitePool) {
     let mut framed = Framed::new(socket, LinesCodec::new());
     while let Some(result) = framed.next().await {
         match result {
@@ -26,9 +31,16 @@ async fn process(socket: TcpStream) {
                 match parse_log(&line) {
                     Ok(log) => {
                         println!("Parsed log: {:?}", log);
+
+                        match sqlx::query!("INSERT INTO logs ('prival', 'version' ,'date' ,'hostname' ,'appname' ,'procid' ,'msgid' ,'structureddata' ,'msg' ,'original_msg', 'timestamp') VALUES (?,?, ?, ?, ?, ?, ?, ?, ?, ?,?)", log.prival, log.version, log.date, log.hostname, log.appname, log.procid, log.msgid, log.structureddata, log.msg, log.original_msg, log.timestamp)
+                            .execute(&db)
+                            .await{
+                                Ok(_) => println!("Log inserted to db"),
+                                Err(error) => println!("Problems inserting log in db {}", error)
+                            }
                     }
                     Err(error) => {
-                        println!("Error while parsing log");
+                        println!("Error while parsing log {}", error);
                     }
                 }
             }
@@ -50,6 +62,7 @@ fn log_pattern() -> &'static Regex {
 
 #[derive(Debug)]
 struct Log {
+    original_msg: String,
     version: Option<u32>,
     prival: u32,
     date: String,
@@ -59,6 +72,7 @@ struct Log {
     msgid: String,
     structureddata: String,
     msg: String,
+    timestamp: DateTime<Utc>,
 }
 fn parse_log(line: &str) -> Result<Log, String> {
     let Some(caps) = log_pattern().captures(&line) else {
@@ -66,6 +80,7 @@ fn parse_log(line: &str) -> Result<Log, String> {
     };
 
     Ok(Log {
+        original_msg: line.to_owned(),
         prival: caps["prival"].parse().unwrap(),
         version: caps.name("version").map(|m| m.as_str().parse().unwrap()),
         date: caps["date"].to_owned(),
@@ -78,5 +93,6 @@ fn parse_log(line: &str) -> Result<Log, String> {
             .name("msg")
             .map(|m| m.as_str().to_owned())
             .unwrap_or_default(),
+        timestamp: Utc::now(),
     })
 }

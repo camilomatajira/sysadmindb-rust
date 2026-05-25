@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO logs ('prival', 'version' ,'date' ,'hostname' ,'appname' ,'procid' ,'msgid' ,'structureddata' ,'msg' ,'original_msg', 'timestamp') VALUES (?,?, ?, ?, ?, ?, ?, ?, ?, ?,?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 11
+    },
+    "nullable": []
+  },
+  "hash": "bd3ebb2045b4945494c1d40f76e4f76e342878fd14c4ff6f3cbee9af510ad0b7"
+}
