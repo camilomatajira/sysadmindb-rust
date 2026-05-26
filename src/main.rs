@@ -1,5 +1,7 @@
-use axum::{Router, routing::get};
+use axum::{Json, extract::State};
+use axum::{Router, body::Body, debug_handler, routing::get};
 use chrono::{DateTime, Utc};
+use serde::Serialize;
 use sqlx::sqlite::SqlitePool;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_stream::StreamExt;
@@ -39,11 +41,35 @@ async fn run_tcp_server(pool: SqlitePool) {
 }
 
 async fn run_http_server(pool: SqlitePool) {
-    let app = Router::new()
-        .route("/", get(|| async { "Hello World!" }))
-        .with_state(pool);
+    let app = Router::new().route("/", get(get_all_logs)).with_state(pool);
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
     axum::serve(listener, app).await.unwrap();
+}
+
+#[axum::debug_handler]
+async fn get_all_logs(State(pool): State<SqlitePool>) -> Json<Vec<Log>> {
+    let rows = sqlx::query_as!(
+        Log,
+        r#"
+      SELECT
+          original_msg,
+          version,
+          prival,
+          date,
+          hostname,
+          appname,
+          procid,
+          msgid,
+          structureddata,
+          msg,
+          timestamp as "timestamp: DateTime<Utc>"
+      FROM logs
+  "#
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    Json(rows)
 }
 
 async fn process(socket: TcpStream, db: SqlitePool) {
@@ -84,20 +110,22 @@ fn log_pattern() -> &'static Regex {
     RE.get_or_init(|| Regex::new(r"<(?<prival>[0-9]+)>(?<version>[0-9])?\s?(?<date>([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+(Z|[+-][0-9]{2}:[0-9]{2})|\w{3}\s[0-9]{2}\s[0-9]{2}:[0-9]{2}:[0-9]{2}))\s(?<hostname>[\w.]+)\s(?<appname>[\w.]+)\s?\[?(?<procid>[0-9-]+)?\]?\:?\s?(?<msgid>(-|\w{2}[0-9]{2}))?\s?(?<structureddata>(\[.+\]|-))?\s?(BOM)?(?<msg>.+)?").unwrap())
 }
 
-#[derive(Debug)]
+// #[derive(Debug)]
+#[derive(Serialize, Debug)]
 struct Log {
     original_msg: String,
-    version: Option<u32>,
-    prival: u32,
+    version: Option<i64>,
+    prival: i64,
     date: String,
     hostname: String,
     appname: String,
-    procid: String,
+    procid: String, // or i64 if you change the migration
     msgid: String,
     structureddata: String,
     msg: String,
     timestamp: DateTime<Utc>,
 }
+
 fn parse_log(line: &str) -> Result<Log, String> {
     let Some(caps) = log_pattern().captures(&line) else {
         return Err("sorry".to_string());

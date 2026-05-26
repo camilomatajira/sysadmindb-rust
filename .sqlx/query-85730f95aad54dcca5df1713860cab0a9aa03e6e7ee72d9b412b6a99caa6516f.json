@@ -1,0 +1,80 @@
+{
+  "db_name": "SQLite",
+  "query": "\n      SELECT\n          original_msg,\n          version,\n          prival,\n          date,\n          hostname,\n          appname,\n          procid,\n          msgid,\n          structureddata,\n          msg,\n          timestamp as \"timestamp: DateTime<Utc>\"\n      FROM logs\n  ",
+  "describe": {
+    "columns": [
+      {
+        "name": "original_msg",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "version",
+        "ordinal": 1,
+        "type_info": "Integer"
+      },
+      {
+        "name": "prival",
+        "ordinal": 2,
+        "type_info": "Integer"
+      },
+      {
+        "name": "date",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "hostname",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "appname",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "procid",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "msgid",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "structureddata",
+        "ordinal": 8,
+        "type_info": "Text"
+      },
+      {
+        "name": "msg",
+        "ordinal": 9,
+        "type_info": "Text"
+      },
+      {
+        "name": "timestamp: DateTime<Utc>",
+        "ordinal": 10,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "85730f95aad54dcca5df1713860cab0a9aa03e6e7ee72d9b412b6a99caa6516f"
+}
