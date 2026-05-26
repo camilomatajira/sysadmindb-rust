@@ -1,4 +1,5 @@
 use axum::extract::Query;
+use axum::http::StatusCode;
 use axum::{Json, extract::State};
 use axum::{Router, debug_handler, routing::get, routing::post};
 use chrono::{DateTime, Utc};
@@ -13,6 +14,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::process::Command;
 use tokio_stream::StreamExt;
 use tokio_util::codec::{Framed, LinesCodec};
+use tower_http::trace::TraceLayer;
 
 #[tokio::main]
 async fn main() {
@@ -48,9 +50,12 @@ async fn run_tcp_server(pool: SqlitePool) {
 }
 
 async fn run_http_server(pool: SqlitePool) {
+    tracing_subscriber::fmt::init(); // prints to stdout
     let app = Router::new()
-        .route("/", get(get_all_logs))
-        .with_state(pool);
+        .route("/", post(get_all_logs))
+        .with_state(pool)
+        .layer(TraceLayer::new_for_http()); // add this
+
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }
@@ -65,21 +70,11 @@ async fn get_all_logs(
     State(pool): State<SqlitePool>,
     Query(query_params): Query<HashMap<String, String>>,
     Json(payload): Json<LogQuery>,
-) {
+) -> Result<String, StatusCode> {
     let mut builder = QueryBuilder::new(
         r#"
       SELECT
-          original_msg,
-          version,
-          prival,
-          date,
-          hostname,
-          appname,
-          procid,
-          msgid,
-          structureddata,
-          msg,
-          timestamp
+          original_msg
       FROM logs
       WHERE 1=1
   "#,
@@ -97,32 +92,47 @@ async fn get_all_logs(
         builder.push_bind(h);
     }
 
-    let rows = builder
-        .build_query_as::<Log>()
+    let rows: Vec<String> = builder
+        .build_query_scalar()
         .fetch_all(&pool)
         .await
-        .unwrap();
-    let json = serde_json::to_string(&rows).unwrap();
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let concateneted_rows = rows.join("\n");
+    println!("{:?}", rows);
 
-    let mut child = Command::new("sh")
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("restricted_bin");
+
+    let mut child = Command::new("/bin/bash")
+        .arg("--norc")
+        .arg("--noprofile")
+        .arg("--restricted")
         .arg("-c")
-        .arg(payload.command) // reads from stdin
+        .env("PATH", &path)
+        .arg(&payload.command)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .spawn() // spawn to get a Child
-        .unwrap();
+        .spawn()
+        .map_err(|e| {
+            println!("Path: {:?}", &path);
+            eprintln!("ERROR executing '{}': {}", &payload.command, e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
 
     child
         .stdin
         .as_mut()
         .unwrap()
-        .write_all(json.as_bytes())
+        .write_all(concateneted_rows.as_bytes())
         .await
-        .unwrap();
-    drop(child.stdin.take()); // signals EOF to sed
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    drop(child.stdin.take());
 
-    let output = child.wait_with_output().await.unwrap();
+    let output = child
+        .wait_with_output()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     println!("{}", String::from_utf8_lossy(&output.stdout));
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
 async fn process(socket: TcpStream, db: SqlitePool) {
