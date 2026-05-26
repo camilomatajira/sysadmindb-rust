@@ -1,17 +1,22 @@
 # SysadminDB Rust
 
-A Rust rewrite of sysadmindb (originally Python). A lightweight log server that receives syslog messages over TCP, stores them in SQLite, and lets you query them over HTTP — including piping results through standard Unix tools like `awk`, `grep`, `sed`, and `jq`.
+A Rust rewrite of sysadmindb (originally Python). A lightweight log server that receives syslog messages over TCP, stores them in SQLite, and lets you query them over HTTP — piping results through standard Unix tools like `awk`, `grep`, `sed`, and `jq`.
 
-This version doesn't have the "restricted shell" that the original sysadmindb has.
-Hence, the httpserver is open to remote shell execution.
+**This tool is not ready for production use.**
 
-This tool is not ready for production use.
+**This tool was made YOLO to learn Tokio and Axum, I didn't write any tests.**
 
 ## Architecture
 
 - **TCP server** (port 1999) — receives syslog messages, parses them, and inserts them into the database
 - **HTTP server** (port 3000) — exposes endpoints to query stored logs
 - **SQLite** — stores parsed log fields
+
+## Security
+
+The HTTP server executes shell commands supplied by the client, but restricts execution to a set of allowed binaries via `bash --restricted` and a controlled `PATH` pointing to `restricted_bin/`. Only commands symlinked into that directory can be run.
+
+Allowed commands: `awk`, `cut`, `grep`, `jq`, `nl`, `sed`, `sort`, `uniq`, `wc`.
 
 ## Requirements
 
@@ -46,36 +51,41 @@ echo '<34>1 2026-05-26T10:00:00.000Z myhost myapp 1234 - - Hello world' | nc loc
 
 ## Querying logs
 
-All queries are `POST /` with a JSON body containing a `command` field. The query results are serialized as JSON and piped through the given shell command, with the output returned in the response.
+All queries use `POST /` with a JSON body containing a `command` field. The server fetches the raw log lines from the database, pipes them through the given command, and returns the output as plain text.
 
-**Get all logs (pass-through):**
+**Get all logs:**
 ```bash
 curl -X POST -H 'Content-Type: application/json' \
-  --data '{"command": "cat"}' \
+  --data '{"command": "sort"}' \
   localhost:3000/
 ```
 
 **Filter by timestamp, hostname, or appname via query params:**
 ```bash
 curl -X POST -H 'Content-Type: application/json' \
-  --data '{"command": "cat"}' \
+  --data '{"command": "sort"}' \
   "localhost:3000/?date_gt=2026-05-26T00:00:00Z"
 
 curl -X POST -H 'Content-Type: application/json' \
-  --data '{"command": "cat"}' \
+  --data '{"command": "sort"}' \
   "localhost:3000/?hostname=myhost&appname=myapp"
 ```
 
-**Pipe results through shell tools:**
+**Pipe results through Unix tools:**
 ```bash
-# Extract just the message field with jq
+# Count log lines
 curl -X POST -H 'Content-Type: application/json' \
-  --data '{"command": "jq .[].msg"}' \
+  --data '{"command": "wc -l"}' \
   localhost:3000/
 
 # Filter with grep
 curl -X POST -H 'Content-Type: application/json' \
   --data '{"command": "grep error"}' \
+  localhost:3000/
+
+# Extract a field with awk
+curl -X POST -H 'Content-Type: application/json' \
+  --data '{"command": "awk \"{print $5}\""}' \
   localhost:3000/
 ```
 
