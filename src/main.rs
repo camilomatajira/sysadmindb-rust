@@ -1,3 +1,4 @@
+use axum::{Router, routing::get};
 use chrono::{DateTime, Utc};
 use sqlx::sqlite::SqlitePool;
 use tokio::net::{TcpListener, TcpStream};
@@ -6,12 +7,27 @@ use tokio_util::codec::{Framed, LinesCodec};
 
 #[tokio::main]
 async fn main() {
-    let listener = TcpListener::bind("127.0.0.1:1999").await.unwrap();
     let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
     let pool = SqlitePool::connect(&database_url).await.unwrap();
 
-    println!("Listening");
+    let tcp_pool = pool.clone();
+    let http_pool = pool.clone();
 
+    let tcp_server = tokio::spawn(async move {
+        run_tcp_server(tcp_pool).await;
+    });
+
+    let http_server = tokio::spawn(async move {
+        run_http_server(http_pool).await;
+    });
+
+    tokio::join!(tcp_server, http_server);
+
+    println!("Listening");
+}
+
+async fn run_tcp_server(pool: SqlitePool) {
+    let listener = TcpListener::bind("127.0.0.1:1999").await.unwrap();
     loop {
         let (socket, _) = listener.accept().await.unwrap();
         let pool_clone = pool.clone();
@@ -20,6 +36,14 @@ async fn main() {
             process(socket, pool_clone).await;
         });
     }
+}
+
+async fn run_http_server(pool: SqlitePool) {
+    let app = Router::new()
+        .route("/", get(|| async { "Hello World!" }))
+        .with_state(pool);
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
+    axum::serve(listener, app).await.unwrap();
 }
 
 async fn process(socket: TcpStream, db: SqlitePool) {
