@@ -1,8 +1,11 @@
+use axum::extract::{Path, Query};
 use axum::{Json, extract::State};
 use axum::{Router, body::Body, debug_handler, routing::get};
 use chrono::{DateTime, Utc};
 use serde::Serialize;
+use sqlx::QueryBuilder;
 use sqlx::sqlite::SqlitePool;
+use std::collections::HashMap;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_stream::StreamExt;
 use tokio_util::codec::{Framed, LinesCodec};
@@ -47,9 +50,12 @@ async fn run_http_server(pool: SqlitePool) {
 }
 
 #[axum::debug_handler]
-async fn get_all_logs(State(pool): State<SqlitePool>) -> Json<Vec<Log>> {
-    let rows = sqlx::query_as!(
-        Log,
+async fn get_all_logs(
+    State(pool): State<SqlitePool>,
+    Query(query_params): Query<HashMap<String, String>>,
+) -> Json<Vec<Log>> {
+    println!("{:?}", query_params);
+    let mut builder = QueryBuilder::new(
         r#"
       SELECT
           original_msg,
@@ -62,13 +68,30 @@ async fn get_all_logs(State(pool): State<SqlitePool>) -> Json<Vec<Log>> {
           msgid,
           structureddata,
           msg,
-          timestamp as "timestamp: DateTime<Utc>"
+          timestamp
       FROM logs
-  "#
-    )
-    .fetch_all(&pool)
-    .await
-    .unwrap();
+      WHERE 1=1
+  "#,
+    );
+    if let Some(h) = query_params.get("date_gt") {
+        println!("camiloooooooooooooo");
+        builder.push("AND timestamp >");
+        builder.push_bind(h);
+    }
+    if let Some(h) = query_params.get("appname") {
+        builder.push("AND appname =");
+        builder.push_bind(h);
+    }
+    if let Some(h) = query_params.get("hostname") {
+        builder.push("AND hostname =");
+        builder.push_bind(h);
+    }
+
+    let rows = builder
+        .build_query_as::<Log>()
+        .fetch_all(&pool)
+        .await
+        .unwrap();
     Json(rows)
 }
 
@@ -111,7 +134,7 @@ fn log_pattern() -> &'static Regex {
 }
 
 // #[derive(Debug)]
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, sqlx::FromRow)]
 struct Log {
     original_msg: String,
     version: Option<i64>,
