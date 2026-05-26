@@ -1,12 +1,17 @@
 use axum::extract::{Path, Query};
 use axum::{Json, extract::State};
-use axum::{Router, body::Body, debug_handler, routing::get};
+use axum::{Router, body::Body, debug_handler, routing::get, routing::post};
 use chrono::{DateTime, Utc};
+use serde::Deserialize;
 use serde::Serialize;
+use serde_json::Value;
 use sqlx::QueryBuilder;
 use sqlx::sqlite::SqlitePool;
 use std::collections::HashMap;
+use std::process::Stdio;
+use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
+use tokio::process::Command;
 use tokio_stream::StreamExt;
 use tokio_util::codec::{Framed, LinesCodec};
 
@@ -44,7 +49,10 @@ async fn run_tcp_server(pool: SqlitePool) {
 }
 
 async fn run_http_server(pool: SqlitePool) {
-    let app = Router::new().route("/", get(get_all_logs)).with_state(pool);
+    let app = Router::new()
+        .route("/", get(get_all_logs))
+        .route("/2", post(get_all_logs_2))
+        .with_state(pool);
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }
@@ -93,6 +101,84 @@ async fn get_all_logs(
         .await
         .unwrap();
     Json(rows)
+}
+#[derive(Deserialize)]
+struct LogQuery {
+    command: String,
+}
+
+#[axum::debug_handler]
+async fn get_all_logs_2(
+    State(pool): State<SqlitePool>,
+    Query(query_params): Query<HashMap<String, String>>,
+    Json(payload): Json<LogQuery>,
+) {
+    let mut builder = QueryBuilder::new(
+        r#"
+      SELECT
+          original_msg,
+          version,
+          prival,
+          date,
+          hostname,
+          appname,
+          procid,
+          msgid,
+          structureddata,
+          msg,
+          timestamp
+      FROM logs
+      WHERE 1=1
+  "#,
+    );
+    if let Some(h) = query_params.get("date_gt") {
+        builder.push("AND timestamp >");
+        builder.push_bind(h);
+    }
+    if let Some(h) = query_params.get("appname") {
+        builder.push("AND appname =");
+        builder.push_bind(h);
+    }
+    if let Some(h) = query_params.get("hostname") {
+        builder.push("AND hostname =");
+        builder.push_bind(h);
+    }
+
+    let rows = builder
+        .build_query_as::<Log>()
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    let json = serde_json::to_string(&rows).unwrap();
+    println!("ANDRESSS");
+    println!("{}", json);
+
+    // let mut child = Command::new("/usr/bin/sed")
+    //     .args(["-n", "p"])
+    //     .stdin(Stdio::piped())
+    //     .spawn()
+    //     .unwrap();
+
+    let mut child = Command::new("sh")
+        .arg("-c")
+        // .arg("sed -n 'p'") // reads from stdin
+        .arg(payload.command) // reads from stdin
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn() // spawn to get a Child
+        .unwrap();
+
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(json.as_bytes())
+        .await
+        .unwrap();
+    drop(child.stdin.take()); // signals EOF to sed
+
+    let output = child.wait_with_output().await.unwrap();
+    println!("{}", String::from_utf8_lossy(&output.stdout));
 }
 
 async fn process(socket: TcpStream, db: SqlitePool) {
