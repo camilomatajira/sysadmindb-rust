@@ -1,10 +1,9 @@
-use axum::extract::{Path, Query};
+use axum::extract::Query;
 use axum::{Json, extract::State};
-use axum::{Router, body::Body, debug_handler, routing::get, routing::post};
+use axum::{Router, debug_handler, routing::get, routing::post};
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde::Serialize;
-use serde_json::Value;
 use sqlx::QueryBuilder;
 use sqlx::sqlite::SqlitePool;
 use std::collections::HashMap;
@@ -51,64 +50,18 @@ async fn run_tcp_server(pool: SqlitePool) {
 async fn run_http_server(pool: SqlitePool) {
     let app = Router::new()
         .route("/", get(get_all_logs))
-        .route("/2", post(get_all_logs_2))
         .with_state(pool);
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }
 
-#[axum::debug_handler]
-async fn get_all_logs(
-    State(pool): State<SqlitePool>,
-    Query(query_params): Query<HashMap<String, String>>,
-) -> Json<Vec<Log>> {
-    println!("{:?}", query_params);
-    let mut builder = QueryBuilder::new(
-        r#"
-      SELECT
-          original_msg,
-          version,
-          prival,
-          date,
-          hostname,
-          appname,
-          procid,
-          msgid,
-          structureddata,
-          msg,
-          timestamp
-      FROM logs
-      WHERE 1=1
-  "#,
-    );
-    if let Some(h) = query_params.get("date_gt") {
-        println!("camiloooooooooooooo");
-        builder.push("AND timestamp >");
-        builder.push_bind(h);
-    }
-    if let Some(h) = query_params.get("appname") {
-        builder.push("AND appname =");
-        builder.push_bind(h);
-    }
-    if let Some(h) = query_params.get("hostname") {
-        builder.push("AND hostname =");
-        builder.push_bind(h);
-    }
-
-    let rows = builder
-        .build_query_as::<Log>()
-        .fetch_all(&pool)
-        .await
-        .unwrap();
-    Json(rows)
-}
 #[derive(Deserialize)]
 struct LogQuery {
     command: String,
 }
 
 #[axum::debug_handler]
-async fn get_all_logs_2(
+async fn get_all_logs(
     State(pool): State<SqlitePool>,
     Query(query_params): Query<HashMap<String, String>>,
     Json(payload): Json<LogQuery>,
@@ -150,18 +103,9 @@ async fn get_all_logs_2(
         .await
         .unwrap();
     let json = serde_json::to_string(&rows).unwrap();
-    println!("ANDRESSS");
-    println!("{}", json);
-
-    // let mut child = Command::new("/usr/bin/sed")
-    //     .args(["-n", "p"])
-    //     .stdin(Stdio::piped())
-    //     .spawn()
-    //     .unwrap();
 
     let mut child = Command::new("sh")
         .arg("-c")
-        // .arg("sed -n 'p'") // reads from stdin
         .arg(payload.command) // reads from stdin
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
