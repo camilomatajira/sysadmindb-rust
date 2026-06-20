@@ -88,6 +88,9 @@ curl -X POST -H 'Content-Type: application/json' \
   --data '{"command": "awk \"{print $5}\""}' \
   localhost:3000/
 ```
+this works with bash
+curl -H 'Content-Type: application/json' --data '{"command": "awk \"{print \\$2}\""}' localhost:3000/                                                
+
 
 ## Log fields
 
